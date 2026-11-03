@@ -82,10 +82,21 @@
 
         <p class="status" id="status" role="status" aria-live="polite"></p>
       </section>
+
+      <!-- БЛОК: Список файлов на сервере -->
+      <section class="file-section" style="margin-top: 30px; border-top: 1px solid var(--border); padding-top: 20px;">
+        <div class="section-title">
+          <h2>Загруженные файлы на сервере</h2>
+          <span class="file-count" id="serverFileCount">0 файлов</span>
+        </div>
+        <div class="file-list" id="serverFileList" style="max-height: 300px; overflow-y: auto;">
+          <!-- Сюда будут подгружаться файлы с сервера -->
+        </div>
+      </section>
     </section>
 
     <footer>
-      Показатель занятого места должен приходить с сервера. Лимиты и срок хранения
+      Показатель занятого места приходит с сервера. Лимиты и срок хранения
       необходимо проверять на сервере — не только в браузере.
     </footer>
   </main>
@@ -143,18 +154,17 @@
     </section>
   </div>
 
-  <!-- Подключение Supabase -->
   <script type="module">
     import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
     const supabaseUrl = 'https://yfeqfmbxiaszpyugvouq.supabase.co';
     const supabaseKey = 'sb_publishable_2n7iNNQ6sphuiUlUk8YZDg__J41n-vJ'; 
-    
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const FILE_LIMIT = 15 * 1024 ** 3;
     const TOTAL_LIMIT = 45 * 1024 ** 3;
+    const FILE_LIMIT = 15 * 1024 ** 3;
 
+    // DOM Элементы
     const fileInput = document.getElementById("fileInput");
     const dropZone = document.getElementById("dropZone");
     const fileList = document.getElementById("fileList");
@@ -181,10 +191,15 @@
     const progressText = document.getElementById("progressText");
     const progressPercent = document.getElementById("progressPercent");
 
+    const serverFileList = document.getElementById("serverFileList");
+    const serverFileCount = document.getElementById("serverFileCount");
+
+    // Переменные состояния
     let files = [];
     let usedBytes = 0;
     let isUploading = false;
 
+    // Вспомогательные функции
     function formatSize(bytes) {
       if (bytes <= 0) return "0 Б";
       const units = ["Б", "КБ", "МБ", "ГБ", "ТБ"];
@@ -220,6 +235,55 @@
       storageFill.style.width = `${percent}%`;
     }
 
+    // Загрузка списка файлов с сервера
+    async function loadServerFiles() {
+      try {
+        const { data, error } = await supabase.storage.from('DROP').list('', { limit: 1000 });
+        if (error) throw error;
+
+        serverFileList.innerHTML = "";
+        let total = 0;
+        let count = 0;
+
+        data.forEach(file => {
+          if (file.name.startsWith('.')) return;
+          count++;
+          const size = file.metadata?.size || 0;
+          total += size;
+          
+          const { data: urlData } = supabase.storage.from('DROP').getPublicUrl(file.name);
+          
+          const row = document.createElement("div");
+          row.className = "file-row";
+          const createdDate = file.created_at ? new Date(file.created_at).toLocaleString('ru-RU') : 'Неизвестно';
+
+          row.innerHTML = `
+            <div class="file-icon" aria-hidden="true">▤</div>
+            <div>
+              <div class="file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+              <div class="file-meta">${formatSize(size)} · загружен: ${createdDate}</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <a href="${urlData.publicUrl}" target="_blank" style="color: #fb6872; font-size: 12px; align-self: center; text-decoration: none;">Скачать</a>
+            </div>
+          `;
+          serverFileList.appendChild(row);
+        });
+
+        usedBytes = total;
+        updateStorageDisplay();
+        serverFileCount.textContent = pluralFiles(count);
+
+        if (count === 0) {
+          serverFileList.innerHTML = "<div style='color: var(--muted); font-size: 13px; text-align: center; padding: 20px;'>Файлов пока нет</div>";
+        }
+      } catch (err) {
+        console.error("Ошибка загрузки списка файлов:", err);
+        serverFileList.innerHTML = "<div style='color: var(--error); font-size: 13px; text-align: center; padding: 20px;'>Не удалось загрузить список файлов</div>";
+      }
+    }
+
+    // Отрисовка выбранных файлов
     function renderFiles() {
       fileList.innerHTML = "";
       files.forEach((file, index) => {
@@ -243,7 +307,6 @@
       fileCount.textContent = pluralFiles(files.length);
       pendingSize.textContent = formatSize(selectedBytes());
       uploadButton.disabled = files.length === 0 || isUploading;
-      updateStorageDisplay();
     }
 
     function setStatus(message, type = "") {
@@ -251,6 +314,7 @@
       statusElement.className = `status${type ? ` ${type}` : ""}`;
     }
 
+    // Добавление файлов в список
     function addFiles(fileCollection) {
       const incoming = Array.from(fileCollection);
       const errors = [];
@@ -264,7 +328,7 @@
           continue;
         }
         if (usedBytes + selectedBytes() + file.size > TOTAL_LIMIT) {
-          errors.push(`${file.name}: превышен общий лимит 45 ГБ.`);
+          errors.push(`${file.name}: превышен общий лимит.`);
           continue;
         }
         files.push(file);
@@ -297,7 +361,6 @@
 
     function showShareModal(uploadedFiles) {
       shareLinksList.innerHTML = "";
-      
       uploadedFiles.forEach(item => {
         const row = document.createElement("div");
         row.style.display = "flex";
@@ -331,7 +394,6 @@
 
         shareLinksList.appendChild(row);
       });
-
       shareModalBackdrop.classList.add("open");
     }
 
@@ -341,7 +403,6 @@
 
     async function uploadFiles() {
       if (!files.length || isUploading) return;
-
       isUploading = true;
       uploadButton.disabled = true;
       confirmUpload.disabled = true;
@@ -363,20 +424,17 @@
           const file = files[i];
           const uniqueName = `${Date.now()}_${file.name}`;
           
-          // Загрузка в Supabase Storage (в бакет 'uploads')
           const { data, error } = await supabase.storage
             .from('DROP')
-            .upload(uniqueName, file, {
-              cacheControl: '3600',
-              upsert: false
+            .upload(uniqueName, file, { 
+              cacheControl: '3600', 
+              upsert: false,
+              metadata: { expiresAt: expiresAt, originalName: file.name }
             });
 
           if (error) throw error;
 
-          // Получение публичной ссылки
-          const { data: urlData } = supabase.storage
-            .from('DROP')
-            .getPublicUrl(uniqueName);
+          const { data: urlData } = supabase.storage.from('DROP').getPublicUrl(uniqueName);
 
           uploadedResults.push({
             name: file.name,
@@ -384,7 +442,6 @@
             expiresAt: expiresAt
           });
 
-          // Обновление прогресса
           const progress = Math.round(((i + 1) / files.length) * 100);
           progressBar.value = progress;
           progressPercent.textContent = progress + "%";
@@ -394,7 +451,10 @@
         
         files = [];
         renderFiles();
-        setStatus("Файлы успешно загружены в Supabase!", "success");
+        
+        await loadServerFiles(); // Обновляем список файлов и счетчик
+        
+        setStatus("Файлы успешно загружены!", "success");
       } catch (error) {
         console.error("Ошибка Supabase:", error);
         setStatus("Ошибка загрузки: " + error.message, "error");
@@ -407,7 +467,7 @@
       }
     }
 
-    // --- Обработчики событий ---
+    // === ОБРАБОТЧИКИ СОБЫТИЙ (ВОТ ОНИ, DRAG AND DROP) ===
     
     fileInput.addEventListener("change", () => {
       addFiles(fileInput.files);
@@ -436,9 +496,11 @@
       }
     });
 
+    // Предотвращаем открытие файлов браузером, если промахнулись мимо зоны
     document.addEventListener("dragover", event => event.preventDefault());
     document.addEventListener("drop", event => event.preventDefault());
 
+    // Кнопки и модалки
     uploadButton.addEventListener("click", openExpiryDialog);
     confirmUpload.addEventListener("click", uploadFiles);
     cancelUpload.addEventListener("click", closeExpiryDialog);
@@ -460,8 +522,10 @@
       }
     });
 
+    // Инициализация при загрузке страницы
     renderFiles();
     updateExpiryNote();
+    loadServerFiles(); 
   </script>
 </body>
 </html>
