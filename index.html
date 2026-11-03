@@ -124,7 +124,7 @@
     </section>
   </div>
 
-  <!-- НОВОЕ Модальное окно с ссылками для шаринга -->
+  <!-- Модальное окно с ссылками для шаринга -->
   <div class="modal-backdrop" id="shareModalBackdrop" role="presentation">
     <section class="modal" role="dialog" aria-modal="true" aria-labelledby="shareModalTitle">
       <div class="modal-mark" aria-hidden="true" style="color: #9fe0b5; border-color: #9fe0b5; background: #9fe0b51a;">✓</div>
@@ -143,22 +143,14 @@
     </section>
   </div>
 
-  <!-- Подключение Firebase -->
+  <!-- Подключение Supabase -->
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
-    import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-storage.js";
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyB0UkpktU3Pjq4NHu3AJn8Y8ZHcwuhH9zA",
-      authDomain: "file-sharing-service-514ee.firebaseapp.com",
-      projectId: "file-sharing-service-514ee",
-      storageBucket: "file-sharing-service-514ee.firebasestorage.app",
-      messagingSenderId: "283690237691",
-      appId: "1:283690237691:web:036f79981f049090957a5e"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const storage = getStorage(app);
+    const supabaseUrl = 'https://yfeqfmbxiaszpyugvouq.supabase.co';
+    const supabaseKey = 'sb_publishable_2n7iNNQ6sphuiUlUk8YZDg__J41n-vJ'; 
+    
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
     const FILE_LIMIT = 15 * 1024 ** 3;
     const TOTAL_LIMIT = 45 * 1024 ** 3;
@@ -303,13 +295,11 @@
       expiryNote.textContent = `После загрузки файлы будут доступны ${optionText.toLowerCase()}, затем сервер должен их удалить.`;
     }
 
-    // НОВАЯ ФУНКЦИЯ: Показ модального окна с ссылками
     function showShareModal(uploadedFiles) {
       shareLinksList.innerHTML = "";
       
       uploadedFiles.forEach(item => {
         const row = document.createElement("div");
-        // Используем стили от списка файлов
         row.style.display = "flex";
         row.style.flexDirection = "column";
         row.style.gap = "6px";
@@ -323,7 +313,6 @@
           </div>
         `;
 
-        // Обработчик копирования
         row.querySelector(".copy-button").addEventListener("click", async (e) => {
           try {
             await navigator.clipboard.writeText(item.url);
@@ -350,7 +339,6 @@
       shareModalBackdrop.classList.remove("open");
     }
 
-    // ОБНОВЛЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ
     async function uploadFiles() {
       if (!files.length || isUploading) return;
 
@@ -358,55 +346,57 @@
       uploadButton.disabled = true;
       confirmUpload.disabled = true;
       confirmUpload.textContent = "Загрузка…";
+      closeExpiryDialog();
+
       progressWrap.style.display = "block";
       progressBar.value = 0;
       progressPercent.textContent = "0%";
       progressText.textContent = "Загружаем файлы…";
-      setStatus("");
+      setStatus("Начинаем загрузку...");
 
-      const totalSize = files.reduce((sum, file) => sum + file.size, 0);
-      let totalUploadedBytes = 0;
       const uploadedResults = [];
       const expiresInSeconds = parseInt(expirySelect.value);
       const expiresAt = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
 
       try {
-        for (const file of files) {
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
           const uniqueName = `${Date.now()}_${file.name}`;
-          const storageRef = ref(storage, `uploads/${uniqueName}`);
-          const uploadTask = uploadBytesResumable(storageRef, file);
+          
+          // Загрузка в Supabase Storage (в бакет 'uploads')
+          const { data, error } = await supabase.storage
+            .from('DROP')
+            .upload(uniqueName, file, {
+              cacheControl: '3600',
+              upsert: false
+            });
 
-          await new Promise((resolve, reject) => {
-            uploadTask.on('state_changed', 
-              (snapshot) => {
-                const currentFileUploaded = snapshot.bytesTransferred;
-                const overallProgress = ((totalUploadedBytes + currentFileUploaded) / totalSize) * 100;
-                progressBar.value = overallProgress;
-                progressPercent.textContent = Math.round(overallProgress) + "%";
-              }, 
-              (error) => reject(error), 
-              async () => {
-                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-                uploadedResults.push({
-                  name: file.name,
-                  url: downloadURL,
-                  expiresAt: expiresAt
-                });
-                totalUploadedBytes += file.size;
-                resolve();
-              }
-            );
+          if (error) throw error;
+
+          // Получение публичной ссылки
+          const { data: urlData } = supabase.storage
+            .from('DROP')
+            .getPublicUrl(uniqueName);
+
+          uploadedResults.push({
+            name: file.name,
+            url: urlData.publicUrl,
+            expiresAt: expiresAt
           });
+
+          // Обновление прогресса
+          const progress = Math.round(((i + 1) / files.length) * 100);
+          progressBar.value = progress;
+          progressPercent.textContent = progress + "%";
         }
 
-        // Вместо старого вывода вызываем всплывающее окно
         showShareModal(uploadedResults);
         
         files = [];
         renderFiles();
-        setStatus("Файлы успешно загружены!", "success");
+        setStatus("Файлы успешно загружены в Supabase!", "success");
       } catch (error) {
-        console.error(error);
+        console.error("Ошибка Supabase:", error);
         setStatus("Ошибка загрузки: " + error.message, "error");
       } finally {
         isUploading = false;
@@ -414,7 +404,6 @@
         confirmUpload.textContent = "Загрузить";
         uploadButton.disabled = files.length === 0;
         progressText.textContent = "Загрузка завершена";
-        closeExpiryDialog();
       }
     }
 
@@ -455,12 +444,10 @@
     cancelUpload.addEventListener("click", closeExpiryDialog);
     expirySelect.addEventListener("change", updateExpiryNote);
 
-    // Закрытие модалки выбора срока
     modalBackdrop.addEventListener("click", event => {
       if (event.target === modalBackdrop) closeExpiryDialog();
     });
 
-    // Закрытие модалки с ссылками
     closeShareModal.addEventListener("click", closeShareDialog);
     shareModalBackdrop.addEventListener("click", event => {
       if (event.target === shareModalBackdrop) closeShareDialog();
@@ -473,7 +460,6 @@
       }
     });
 
-    // Инициализация
     renderFiles();
     updateExpiryNote();
   </script>
