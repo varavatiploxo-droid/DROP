@@ -1,0 +1,481 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d0d0f">
+  <title>DROP — временная загрузка файлов</title>
+
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div class="logo" aria-hidden="true">D</div>
+      <div>
+        <div class="brand">DROP</div>
+        <div class="brand-caption">Временная передача файлов</div>
+      </div>
+    </header>
+
+    <section class="heading">
+      <h1>Файлы. Просто.</h1>
+      <p>
+        Перетащите файлы в область загрузки. До 15 ГБ на один файл
+        и до 45 ГБ общего объёма.
+      </p>
+    </section>
+
+    <section class="card">
+      <div class="drop-zone" id="dropZone">
+        <div>
+          <div class="drop-icon" aria-hidden="true">↑</div>
+          <p class="drop-title">Перетащите файлы сюда</p>
+          <p class="drop-hint">Поддерживаются любые типы файлов</p>
+          <label class="browse-button" for="fileInput">Или выберите файлы</label>
+        </div>
+      </div>
+
+      <input id="fileInput" type="file" multiple>
+
+      <section class="storage-card" aria-label="Использование хранилища">
+        <div class="storage-top">
+          <div class="storage-title">Общее занятое место</div>
+          <div class="storage-numbers">
+            <strong id="usedText">0 Б</strong> / 45 ГБ
+          </div>
+        </div>
+        <div class="bar" aria-label="Занятое место">
+          <div class="bar-fill" id="storageFill"></div>
+        </div>
+        <div class="storage-details">
+          <span id="remainingText">Осталось 45 ГБ</span>
+          <span>Лимит одного файла — 15 ГБ</span>
+        </div>
+      </section>
+
+      <section class="file-section">
+        <div class="section-title">
+          <h2>Файлы к загрузке</h2>
+          <span class="file-count" id="fileCount">0 файлов</span>
+        </div>
+
+        <div class="file-list" id="fileList"></div>
+
+        <div class="actions">
+          <div class="pending-size">
+            В выбранных файлах: <strong id="pendingSize">0 Б</strong>
+          </div>
+          <button class="upload-button" id="uploadButton" type="button" disabled>
+            Продолжить загрузку
+          </button>
+        </div>
+
+        <div class="progress-wrap" id="progressWrap">
+          <div class="progress-info">
+            <span id="progressText">Загрузка…</span>
+            <span id="progressPercent">0%</span>
+          </div>
+          <progress id="progressBar" max="100" value="0"></progress>
+        </div>
+
+        <p class="status" id="status" role="status" aria-live="polite"></p>
+      </section>
+    </section>
+
+    <footer>
+      Показатель занятого места должен приходить с сервера. Лимиты и срок хранения
+      необходимо проверять на сервере — не только в браузере.
+    </footer>
+  </main>
+
+  <!-- Модальное окно выбора срока -->
+  <div class="modal-backdrop" id="modalBackdrop" role="presentation">
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-mark" aria-hidden="true">◷</div>
+      <h2 id="modalTitle">Когда удалить файлы?</h2>
+      <p class="modal-description">
+        Выберите срок хранения. По его окончании сервер автоматически удалит загруженные файлы.
+      </p>
+
+      <label class="expiry-label" for="expirySelect">Срок хранения</label>
+      <select class="expiry-select" id="expirySelect">
+        <option value="60">1 минута</option>
+        <option value="300">5 минут</option>
+        <option value="900">15 минут</option>
+        <option value="1800">30 минут</option>
+        <option value="3600">1 час</option>
+        <option value="21600">6 часов</option>
+        <option value="43200">12 часов</option>
+        <option value="86400" selected>1 день</option>
+        <option value="259200">3 дня</option>
+        <option value="604800">7 дней</option>
+      </select>
+
+      <p class="expiry-note" id="expiryNote">
+        Файлы будут доступны до истечения выбранного срока.
+      </p>
+
+      <div class="modal-actions">
+        <button class="modal-button" id="cancelUpload" type="button">Отмена</button>
+        <button class="modal-button primary" id="confirmUpload" type="button">Загрузить</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- НОВОЕ Модальное окно с ссылками для шаринга -->
+  <div class="modal-backdrop" id="shareModalBackdrop" role="presentation">
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="shareModalTitle">
+      <div class="modal-mark" aria-hidden="true" style="color: #9fe0b5; border-color: #9fe0b5; background: #9fe0b51a;">✓</div>
+      <h2 id="shareModalTitle">Успешно загружено!</h2>
+      <p class="modal-description">
+        Скопируйте ссылки, чтобы поделиться файлами.
+      </p>
+
+      <div id="shareLinksList" style="max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; margin-bottom: 10px;">
+        <!-- Сюда будут вставляться ссылки -->
+      </div>
+
+      <div class="modal-actions">
+        <button class="modal-button primary" id="closeShareModal" type="button">Готово</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- Подключение Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
+    import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-storage.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyB0UkpktU3Pjq4NHu3AJn8Y8ZHcwuhH9zA",
+      authDomain: "file-sharing-service-514ee.firebaseapp.com",
+      projectId: "file-sharing-service-514ee",
+      storageBucket: "file-sharing-service-514ee.firebasestorage.app",
+      messagingSenderId: "283690237691",
+      appId: "1:283690237691:web:036f79981f049090957a5e"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const storage = getStorage(app);
+
+    const FILE_LIMIT = 15 * 1024 ** 3;
+    const TOTAL_LIMIT = 45 * 1024 ** 3;
+
+    const fileInput = document.getElementById("fileInput");
+    const dropZone = document.getElementById("dropZone");
+    const fileList = document.getElementById("fileList");
+    const fileCount = document.getElementById("fileCount");
+    const pendingSize = document.getElementById("pendingSize");
+    const usedText = document.getElementById("usedText");
+    const remainingText = document.getElementById("remainingText");
+    const storageFill = document.getElementById("storageFill");
+    const uploadButton = document.getElementById("uploadButton");
+    const statusElement = document.getElementById("status");
+    
+    const modalBackdrop = document.getElementById("modalBackdrop");
+    const expirySelect = document.getElementById("expirySelect");
+    const expiryNote = document.getElementById("expiryNote");
+    const confirmUpload = document.getElementById("confirmUpload");
+    const cancelUpload = document.getElementById("cancelUpload");
+    
+    const shareModalBackdrop = document.getElementById("shareModalBackdrop");
+    const shareLinksList = document.getElementById("shareLinksList");
+    const closeShareModal = document.getElementById("closeShareModal");
+
+    const progressWrap = document.getElementById("progressWrap");
+    const progressBar = document.getElementById("progressBar");
+    const progressText = document.getElementById("progressText");
+    const progressPercent = document.getElementById("progressPercent");
+
+    let files = [];
+    let usedBytes = 0;
+    let isUploading = false;
+
+    function formatSize(bytes) {
+      if (bytes <= 0) return "0 Б";
+      const units = ["Б", "КБ", "МБ", "ГБ", "ТБ"];
+      const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      const value = bytes / (1024 ** index);
+      return `${value.toLocaleString("ru-RU", { maximumFractionDigits: index === 0 ? 0 : 2 })} ${units[index]}`;
+    }
+
+    function pluralFiles(amount) {
+      const mod10 = amount % 10;
+      const mod100 = amount % 100;
+      if (mod10 === 1 && mod100 !== 11) return `${amount} файл`;
+      if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${amount} файла`;
+      return `${amount} файлов`;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, char => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      })[char]);
+    }
+
+    function selectedBytes() {
+      return files.reduce((sum, file) => sum + file.size, 0);
+    }
+
+    function updateStorageDisplay() {
+      const safeUsed = Math.max(0, Math.min(usedBytes, TOTAL_LIMIT));
+      const left = Math.max(0, TOTAL_LIMIT - safeUsed);
+      const percent = Math.min(100, (safeUsed / TOTAL_LIMIT) * 100);
+      usedText.textContent = formatSize(usedBytes);
+      remainingText.textContent = `Осталось ${formatSize(left)}`;
+      storageFill.style.width = `${percent}%`;
+    }
+
+    function renderFiles() {
+      fileList.innerHTML = "";
+      files.forEach((file, index) => {
+        const row = document.createElement("div");
+        row.className = "file-row";
+        row.innerHTML = `
+          <div class="file-icon" aria-hidden="true">▤</div>
+          <div>
+            <div class="file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+            <div class="file-meta">${formatSize(file.size)}</div>
+          </div>
+          <button class="remove-button" type="button" aria-label="Удалить из списка">×</button>
+        `;
+        row.querySelector(".remove-button").addEventListener("click", () => {
+          files.splice(index, 1);
+          renderFiles();
+        });
+        fileList.appendChild(row);
+      });
+
+      fileCount.textContent = pluralFiles(files.length);
+      pendingSize.textContent = formatSize(selectedBytes());
+      uploadButton.disabled = files.length === 0 || isUploading;
+      updateStorageDisplay();
+    }
+
+    function setStatus(message, type = "") {
+      statusElement.textContent = message;
+      statusElement.className = `status${type ? ` ${type}` : ""}`;
+    }
+
+    function addFiles(fileCollection) {
+      const incoming = Array.from(fileCollection);
+      const errors = [];
+      const known = new Set(files.map(file => `${file.name}:${file.size}:${file.lastModified}`));
+
+      for (const file of incoming) {
+        const key = `${file.name}:${file.size}:${file.lastModified}`;
+        if (known.has(key)) continue;
+        if (file.size > FILE_LIMIT) {
+          errors.push(`${file.name}: размер больше 15 ГБ.`);
+          continue;
+        }
+        if (usedBytes + selectedBytes() + file.size > TOTAL_LIMIT) {
+          errors.push(`${file.name}: превышен общий лимит 45 ГБ.`);
+          continue;
+        }
+        files.push(file);
+        known.add(key);
+      }
+
+      renderFiles();
+      if (errors.length) {
+        setStatus(errors.join(" "), "error");
+      } else if (incoming.length) {
+        setStatus("Файлы добавлены. Нажмите «Продолжить загрузку».");
+      }
+    }
+
+    function openExpiryDialog() {
+      if (!files.length || isUploading) return;
+      modalBackdrop.classList.add("open");
+      confirmUpload.focus();
+    }
+
+    function closeExpiryDialog() {
+      modalBackdrop.classList.remove("open");
+      uploadButton.focus();
+    }
+
+    function updateExpiryNote() {
+      const optionText = expirySelect.options[expirySelect.selectedIndex].text;
+      expiryNote.textContent = `После загрузки файлы будут доступны ${optionText.toLowerCase()}, затем сервер должен их удалить.`;
+    }
+
+    // НОВАЯ ФУНКЦИЯ: Показ модального окна с ссылками
+    function showShareModal(uploadedFiles) {
+      shareLinksList.innerHTML = "";
+      
+      uploadedFiles.forEach(item => {
+        const row = document.createElement("div");
+        // Используем стили от списка файлов
+        row.style.display = "flex";
+        row.style.flexDirection = "column";
+        row.style.gap = "6px";
+        
+        row.innerHTML = `
+          <span style="font-size: 12px; font-weight: bold; color: #f5f2f3;">${escapeHtml(item.name)}</span>
+          <div style="display: flex; gap: 6px;">
+            <input type="text" value="${escapeHtml(item.url)}" readonly 
+                   style="flex: 1; padding: 8px; border: 1px solid #363236; border-radius: 8px; background: #111012; color: #aaa1a4; font-size: 11px;">
+            <button class="copy-button" type="button" style="margin-left: 0; padding: 8px 12px;">Копировать</button>
+          </div>
+        `;
+
+        // Обработчик копирования
+        row.querySelector(".copy-button").addEventListener("click", async (e) => {
+          try {
+            await navigator.clipboard.writeText(item.url);
+            e.target.textContent = "Скопировано!";
+            e.target.style.color = "#9fe0b5";
+            e.target.style.borderColor = "#9fe0b5";
+            setTimeout(() => {
+              e.target.textContent = "Копировать";
+              e.target.style.color = "";
+              e.target.style.borderColor = "";
+            }, 2000);
+          } catch {
+            alert("Не удалось скопировать ссылку.");
+          }
+        });
+
+        shareLinksList.appendChild(row);
+      });
+
+      shareModalBackdrop.classList.add("open");
+    }
+
+    function closeShareDialog() {
+      shareModalBackdrop.classList.remove("open");
+    }
+
+    // ОБНОВЛЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ
+    async function uploadFiles() {
+      if (!files.length || isUploading) return;
+
+      isUploading = true;
+      uploadButton.disabled = true;
+      confirmUpload.disabled = true;
+      confirmUpload.textContent = "Загрузка…";
+      progressWrap.style.display = "block";
+      progressBar.value = 0;
+      progressPercent.textContent = "0%";
+      progressText.textContent = "Загружаем файлы…";
+      setStatus("");
+
+      const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+      let totalUploadedBytes = 0;
+      const uploadedResults = [];
+      const expiresInSeconds = parseInt(expirySelect.value);
+      const expiresAt = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
+
+      try {
+        for (const file of files) {
+          const uniqueName = `${Date.now()}_${file.name}`;
+          const storageRef = ref(storage, `uploads/${uniqueName}`);
+          const uploadTask = uploadBytesResumable(storageRef, file);
+
+          await new Promise((resolve, reject) => {
+            uploadTask.on('state_changed', 
+              (snapshot) => {
+                const currentFileUploaded = snapshot.bytesTransferred;
+                const overallProgress = ((totalUploadedBytes + currentFileUploaded) / totalSize) * 100;
+                progressBar.value = overallProgress;
+                progressPercent.textContent = Math.round(overallProgress) + "%";
+              }, 
+              (error) => reject(error), 
+              async () => {
+                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                uploadedResults.push({
+                  name: file.name,
+                  url: downloadURL,
+                  expiresAt: expiresAt
+                });
+                totalUploadedBytes += file.size;
+                resolve();
+              }
+            );
+          });
+        }
+
+        // Вместо старого вывода вызываем всплывающее окно
+        showShareModal(uploadedResults);
+        
+        files = [];
+        renderFiles();
+        setStatus("Файлы успешно загружены!", "success");
+      } catch (error) {
+        console.error(error);
+        setStatus("Ошибка загрузки: " + error.message, "error");
+      } finally {
+        isUploading = false;
+        confirmUpload.disabled = false;
+        confirmUpload.textContent = "Загрузить";
+        uploadButton.disabled = files.length === 0;
+        progressText.textContent = "Загрузка завершена";
+        closeExpiryDialog();
+      }
+    }
+
+    // --- Обработчики событий ---
+    
+    fileInput.addEventListener("change", () => {
+      addFiles(fileInput.files);
+      fileInput.value = "";
+    });
+
+    ["dragenter", "dragover"].forEach(eventName => {
+      dropZone.addEventListener(eventName, event => {
+        event.preventDefault();
+        dropZone.classList.add("dragging");
+      });
+    });
+
+    ["dragleave", "dragend"].forEach(eventName => {
+      dropZone.addEventListener(eventName, event => {
+        event.preventDefault();
+        dropZone.classList.remove("dragging");
+      });
+    });
+
+    dropZone.addEventListener("drop", event => {
+      event.preventDefault();
+      dropZone.classList.remove("dragging");
+      if (event.dataTransfer?.files) {
+        addFiles(event.dataTransfer.files);
+      }
+    });
+
+    document.addEventListener("dragover", event => event.preventDefault());
+    document.addEventListener("drop", event => event.preventDefault());
+
+    uploadButton.addEventListener("click", openExpiryDialog);
+    confirmUpload.addEventListener("click", uploadFiles);
+    cancelUpload.addEventListener("click", closeExpiryDialog);
+    expirySelect.addEventListener("change", updateExpiryNote);
+
+    // Закрытие модалки выбора срока
+    modalBackdrop.addEventListener("click", event => {
+      if (event.target === modalBackdrop) closeExpiryDialog();
+    });
+
+    // Закрытие модалки с ссылками
+    closeShareModal.addEventListener("click", closeShareDialog);
+    shareModalBackdrop.addEventListener("click", event => {
+      if (event.target === shareModalBackdrop) closeShareDialog();
+    });
+
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") {
+        if (modalBackdrop.classList.contains("open")) closeExpiryDialog();
+        if (shareModalBackdrop.classList.contains("open")) closeShareDialog();
+      }
+    });
+
+    // Инициализация
+    renderFiles();
+    updateExpiryNote();
+  </script>
+</body>
+</html>
